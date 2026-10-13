@@ -1,0 +1,213 @@
+---
+title: "Learning What Drives Nightly Price on Airbnb"
+author: "Cesar Aguilar"
+date: "2026-09-09"
+output: html_document
+---
+
+## Link to Data Source
+
+Source: Inside Airbnb <https://insideairbnb.com/get-the-data/>
+
+File used:
+<https://data.insideairbnb.com/united-states/nc/asheville/2026-06-25/data/listings.csv.gz>
+
+**My question:** which things that a host actually controls affect the nightly
+price of a listing?
+
+**Hypothesis:** Listings that sleep more guests charge higher nightly prices.
+
+**Null hypothesis:** Guest capacity has no relationship with nightly price.
+
+## Load Dataset
+
+```{r}
+listings <- read.csv("listings.csv", stringsAsFactors = FALSE)
+
+# Room type counts before cleaning, so I can compare after
+table(listings$room_type)
+
+# price_quote_price_per_night is already a number. The plain price column
+# loads as text and cannot be used for math.
+listings$price_num <- listings$price_quote_price_per_night
+
+d <- listings[, c("price_num", "accommodates", "bedrooms",
+                  "review_scores_rating", "minimum_nights", "room_type")]
+
+d <- na.omit(d)
+
+# Drop a few extreme prices above $2,000
+d <- subset(d, price_num > 0 & price_num <= 2000)
+
+nrow(d)
+head(d)
+```
+
+After cleaning I have 2,202 listings left out of the original 2,865.
+
+## Question 1: Visualizing the Data
+
+I plotted price against number of bedrooms, since bedrooms is one of the first
+things a host decides on.
+
+```{r}
+boxplot(price_num ~ bedrooms, data = d,
+        main = "Nightly Price by Number of Bedrooms (Asheville, NC)",
+        xlab = "Number of Bedrooms",
+        ylab = "Nightly Price (USD)",
+        col = "lightblue")
+
+abline(h = median(d$price_num), col = "red", lty = 2, lwd = 2)
+legend("topleft", legend = "Overall median price",
+       col = "red", lty = 2, lwd = 2)
+```
+
+**Explanation:** The graph shows that price goes up as bedrooms go up. The
+boxes also get taller, so bigger places are more expensive and also more spread
+out in price. The red dashed line is the overall median of $241.84. One bedroom
+listings sit mostly below it, and anything with three or more bedrooms is
+clearly above it. The dots above the boxes are outliers, so even small listings
+sometimes charge a lot.
+
+## Question 2: Simple Statistical Calculation
+
+My question is about price, so I started with the basic stats for price.
+
+```{r}
+mean(d$price_num)
+median(d$price_num)
+sd(d$price_num)
+```
+
+**Explanation:** The mean price is $302.61 and the median is $241.84. The mean
+is about $60 higher than the median, which means a few expensive listings are
+pulling the average up. So the median is the better number to describe a
+typical Asheville listing. The standard deviation is $221.95, which is almost
+as big as the median, so prices are very spread out. That spread is useful for
+my question because it means there is a lot of room between a cheap listing and
+an expensive one. This sets up my hypothesis, since if guest capacity really drives price, then capacity should explain a good chunk of that $221.95 spread.
+
+## Question 3: Correlation and Regression
+
+I tested whether the number of guests a listing sleeps is related to price.
+
+```{r}
+cor.test(d$accommodates, d$price_num)
+
+model1 <- lm(price_num ~ accommodates, data = d)
+summary(model1)
+```
+
+```{r}
+plot(d$accommodates, d$price_num,
+     main = "Nightly Price vs Guest Capacity",
+     xlab = "Guests Accommodated",
+     ylab = "Nightly Price (USD)",
+     col = "blue")
+
+abline(model1, col = "red", lwd = 2)
+legend("topleft", legend = "Regression line", col = "red", lwd = 2)
+```
+
+**Explanation:** The correlation is r = 0.767 and the p value is below 2.2e-16,
+so the relationship is strong and not random. The R squared is 0.589, meaning
+guest capacity by itself explains about 59% of the price difference between
+listings. The slope says each extra guest a listing sleeps is worth about
+$49.60 more per night.Capacity is the biggest lever a host has.
+
+### Comparing p values across variables
+
+I loaded four numeric columns, so I ran the same correlation test on each one against price
+
+```{r}
+test1 <- cor.test(d$accommodates, d$price_num)
+test2 <- cor.test(d$bedrooms, d$price_num)
+test3 <- cor.test(d$review_scores_rating, d$price_num)
+test4 <- cor.test(d$minimum_nights, d$price_num)
+
+results <- data.frame(
+  variable = c("accommodates", "bedrooms", "review_scores_rating",
+               "minimum_nights"),
+  correlation = c(test1$estimate, test2$estimate,
+                  test3$estimate, test4$estimate),
+  p_value = c(test1$p.value, test2$p.value,
+              test3$p.value, test4$p.value)
+)
+
+results
+```
+
+**Explanation:** All four show significant, but with 2,202 rows even a very weak relationship will test as
+significant, so the correlation column is what actually shows strength.
+Accommodates (0.767) and bedrooms (0.745) are both strong, and their p values
+printed as basically 0. Minimum nights is weak and negative (-0.200), so listings that require longer stays
+charge a little less per night.
+Its p value of 0.0038 is under 0.05, so it counts as significant, but the correlation is only 0.062, which is
+almost no relationship. Going by p values alone I would have said review scores
+drive price, and that would not be entirely true.
+
+## Question 4: Histogram and Distribution
+
+```{r}
+hist(d$price_num,
+     breaks = 40,
+     main = "Distribution of Nightly Prices (Asheville, NC)",
+     xlab = "Nightly Price (USD)",
+     ylab = "Number of Listings",
+     col = "lightgreen")
+
+abline(v = median(d$price_num), col = "red", lwd = 2)
+legend("topright", legend = "Median ($241.84)", col = "red", lwd = 2)
+```
+
+**Explanation:** This is right skewed. Most listings are between about $100 and $350, and then there is a long tail going out toward
+$2,000. This matches question 2, where the mean was higher than the median. This matters because a t test works best on data that is
+roughly normal. Taking the log of price fixes the shape:
+
+```{r}
+d$logprice <- log(d$price_num)
+
+hist(d$logprice,
+     breaks = 40,
+     main = "Distribution of Log Nightly Prices",
+     xlab = "Log of Nightly Price",
+     ylab = "Number of Listings",
+     col = "lightgreen")
+```
+
+
+## Question 5: Two Group Test
+
+I split the listings into entire homes and private rooms. This matters for my
+question because listing a whole unit or just a room is a choice the host makes.
+
+```{r}
+table(d$room_type)
+
+two_groups <- subset(d, room_type == "Entire home/apt" | room_type == "Private room")
+
+aggregate(price_num ~ room_type, data = two_groups, FUN = median)
+
+# t test on log price, since question 4 showed raw price is skewed
+t.test(logprice ~ room_type, data = two_groups)
+```
+
+**Explanation:** After cleaning there are 2,110 entire homes and only 82
+private rooms, down from 256 in the raw file, so a lot of private rooms were
+missing bedroom counts or review scores. The medians are $247.75 and $124.20,
+so entire homes are about double.
+I used a t test on log price because question 4 showed raw price is skewed.
+The result is t = 8.10 and p = 3.25e-12, so the difference is real. The
+difference in log means is 0.626, and exp(0.626) is about 1.87, so entire homes
+charge roughly 87% more per night than private rooms. That fits the rest of my
+results, since an entire home is basically a bigger unit with more capacity.
+
+## Conclusion
+
+Guest capacity alone explains about 59% of the price difference between listings, each extra guest 
+is worth around $49.60 a night, and entire homes charge close to double what private rooms do. If you
+already have the unit, the levers are adding a sleeping spot and listing the
+whole place instead of a room. Review scores did not show to be as important since its
+correlation with price was only 0.062 even though the test called it
+significant. One thing to keep in mind is that only 82 private rooms were left
+after cleaning, so that last comparison is based on a small group.
