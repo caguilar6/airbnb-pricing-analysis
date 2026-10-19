@@ -7,6 +7,8 @@ I looked at 2,865 Airbnb listings in Asheville, North Carolina.
 
 📄 **[View the full report](https://caguilar6.github.io/airbnb-pricing-analysis/asheville_report.html)**
 
+[D3 page](d3_airbnb/)
+
 ## The Data
 
 - **Source:** [Inside Airbnb](https://insideairbnb.com/get-the-data/), Asheville listings from June 25, 2026
